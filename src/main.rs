@@ -2,7 +2,7 @@
 #![no_main]
 mod printer;
 use esp32c3_hal::{
-    clock::ClockControl, peripherals::Peripherals, prelude::*, timer::TimerGroup, Rtc,
+    clock::ClockControl, peripherals::Peripherals, prelude::*, timer::TimerGroup, Delay, Rtc, IO,
 };
 use esp_backtrace as _;
 
@@ -26,5 +26,15 @@ fn main() -> ! {
 
     println!("Hello, world!");
 
-    loop {}
+    let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
+    let button = io.pins.gpio9.into_pull_up_input();
+    let mut delay = Delay::new(&clocks);
+
+    loop {
+        if button.is_high().unwrap() {
+        } else {
+            println!("Button is pressed!");
+            delay.delay_ms(500u32);
+        }
+    }
 }

@@ -2,6 +2,7 @@
     "rust-analyzer.checkOnSave.allTargets": false,
     "cSpell.words": [
         "CNTL",
+        "GPIO",
         "riscv",
         "rwdt",
         "TIMG"
