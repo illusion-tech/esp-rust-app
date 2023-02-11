@@ -1,0 +1,9 @@
+{
+    "rust-analyzer.checkOnSave.allTargets": false,
+    "cSpell.words": [
+        "CNTL",
+        "riscv",
+        "rwdt",
+        "TIMG"
+    ],
+}
