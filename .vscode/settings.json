@@ -3,6 +3,7 @@
     "cSpell.words": [
         "CNTL",
         "GPIO",
+        "Leds",
         "riscv",
         "rwdt",
         "TIMG"
