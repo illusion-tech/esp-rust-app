@@ -11,20 +11,23 @@ use esp32c3_hal::uart::TxRxPins;
 use esp32c3_hal::{
     clock::ClockControl,
     gpio::{Event, Gpio9, Input, PullDown, IO},
-    interrupt::{self, CpuInterrupt, InterruptKind, Priority},
-    peripherals::{Interrupt, Peripherals, UART1},
+    interrupt,
+    peripherals::{self, Peripherals, UART1},
     prelude::*,
-    riscv,
     timer::TimerGroup,
     uart::config::{Config, DataBits, Parity, StopBits},
-    Cpu, Delay, Rtc, Uart,
+    Cpu,
+    Delay,
+    Rtc,
+    Uart,
 };
 use esp_backtrace as _;
+use riscv_rt;
 
 static BUTTON: Mutex<RefCell<Option<Gpio9<Input<PullDown>>>>> = Mutex::new(RefCell::new(None));
 static SERIAL1: Mutex<RefCell<Option<Uart<UART1>>>> = Mutex::new(RefCell::new(None));
 
-#[entry]
+#[riscv_rt::entry]
 fn main() -> ! {
     let peripherals = Peripherals::take();
     let system = peripherals.SYSTEM.split();
@@ -71,13 +74,13 @@ fn main() -> ! {
     critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(button));
     critical_section::with(|cs| SERIAL1.borrow_ref_mut(cs).replace(serial1));
 
-    interrupt::enable(Interrupt::GPIO, Priority::Priority3).unwrap();
-    interrupt::enable(Interrupt::UART1, Priority::Priority1).unwrap();
-    interrupt::set_kind(Cpu::ProCpu, CpuInterrupt::Interrupt1, InterruptKind::Edge);
-
-    unsafe {
-        riscv::interrupt::enable();
-    }
+    interrupt::enable(peripherals::Interrupt::GPIO, interrupt::Priority::Priority3).unwrap();
+    interrupt::enable(peripherals::Interrupt::UART1, interrupt::Priority::Priority1).unwrap();
+    interrupt::set_kind(
+        Cpu::ProCpu,
+        interrupt::CpuInterrupt::Interrupt1,
+        interrupt::InterruptKind::Edge,
+    );
 
     let mut delay = Delay::new(&clocks);
     println!("Hello world!");
