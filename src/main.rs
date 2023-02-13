@@ -1,19 +1,37 @@
+//! GPIO interrupt
+//!
+//! This prints "Interrupt" when the boot button is pressed.
+
 #![no_std]
 #![no_main]
 mod printer;
+use core::{cell::RefCell, fmt::Write};
+use critical_section::Mutex;
+use esp32c3_hal::uart::TxRxPins;
 use esp32c3_hal::{
-    clock::ClockControl, peripherals::Peripherals, prelude::*, pulse_control::RepeatMode,
-    timer::TimerGroup, Delay, Rtc, IO,
+    clock::ClockControl,
+    gpio::{Event, Gpio9, Input, PullDown, IO},
+    interrupt::{self, CpuInterrupt, InterruptKind, Priority},
+    peripherals::{Interrupt, Peripherals, UART1},
+    prelude::*,
+    riscv,
+    timer::TimerGroup,
+    uart::config::{Config, DataBits, Parity, StopBits},
+    Cpu, Delay, Rtc, Uart,
 };
 use esp_backtrace as _;
 
-#[riscv_rt::entry]
+static BUTTON: Mutex<RefCell<Option<Gpio9<Input<PullDown>>>>> = Mutex::new(RefCell::new(None));
+static SERIAL1: Mutex<RefCell<Option<Uart<UART1>>>> = Mutex::new(RefCell::new(None));
+
+#[entry]
 fn main() -> ! {
     let peripherals = Peripherals::take();
-    let mut system = peripherals.SYSTEM.split();
+    let system = peripherals.SYSTEM.split();
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
-    // Disable the RTC and TIMG watchdog timers
+    // Disable the watchdog timers. For the ESP32-C3, this includes the Super WDT,
+    // the RTC WDT, and the TIMG WDTs.
     let mut rtc = Rtc::new(peripherals.RTC_CNTL);
     let timer_group0 = TimerGroup::new(peripherals.TIMG0, &clocks);
     let mut wdt0 = timer_group0.wdt;
@@ -25,46 +43,67 @@ fn main() -> ! {
     wdt0.disable();
     wdt1.disable();
 
-    println!("Hello, world!");
-
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
-    let button = io.pins.gpio9.into_pull_up_input();
+
+    // Set GPIO9 as an input
+    let mut button = io.pins.gpio9.into_pull_down_input();
+    // let mut serial1 = Uart::new(peripherals.UART1);
+    let serial1 = Uart::new_with_config(
+        peripherals.UART1,
+        Some(Config {
+            baudrate: 115200,
+            data_bits: DataBits::DataBits8,
+            parity: Parity::ParityNone,
+            stop_bits: StopBits::STOP1,
+        }),
+        Some(TxRxPins::new_tx_rx(
+            io.pins.gpio0.into_push_pull_output(),
+            io.pins.gpio1.into_floating_input(),
+        )),
+        &clocks,
+    );
+
+    button.listen(Event::FallingEdge);
+
+    // serial1.set_rx_fifo_full_threshold(30);
+    // serial1.listen_rx_fifo_full();
+
+    critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(button));
+    critical_section::with(|cs| SERIAL1.borrow_ref_mut(cs).replace(serial1));
+
+    interrupt::enable(Interrupt::GPIO, Priority::Priority3).unwrap();
+    interrupt::enable(Interrupt::UART1, Priority::Priority1).unwrap();
+    interrupt::set_kind(Cpu::ProCpu, CpuInterrupt::Interrupt1, InterruptKind::Edge);
+
+    unsafe {
+        riscv::interrupt::enable();
+    }
+
     let mut delay = Delay::new(&clocks);
-
-    // let b = system.;
-    let pulse = esp32c3_hal::PulseControl::new(
-        peripherals.RMT,
-        &mut system.peripheral_clock_control,
-        esp32c3_hal::pulse_control::ClockSource::APB,
-        0,
-        0,
-        0,
-    )
-    .unwrap();
-
-    let mut channel = pulse.channel0;
-
-    channel
-        .set_idle_output_level(false)
-        .set_carrier_modulation(false)
-        .set_channel_divider(1)
-        .set_idle_output(true);
-
-    let mut led = channel.assign_pin(io.pins.gpio8);
-
-    // let mut rmt_buffer = [0u32; 25];
-    // rmt_buffer
-
-    match led.send_pulse_sequence_raw(RepeatMode::SingleShot, &[0u32; 25]) {
-        Ok(_) => println!("Success!"),
-        Err(e) => println!("Error: {:?}", e),
-    }
-
+    println!("Hello world!");
     loop {
-        if button.is_high().unwrap() {
-        } else {
-            println!("Button is pressed!");
-            delay.delay_ms(500u32);
-        }
+        print!(".");
+        // led.toggle().unwrap();
+        delay.delay_ms(500u32);
     }
+}
+
+#[interrupt]
+fn GPIO() {
+    critical_section::with(|cs| {
+        println!("GPIO interrupt");
+
+        let mut serial1 = SERIAL1.borrow_ref_mut(cs);
+        let serial1 = serial1.as_mut().unwrap();
+
+        // let serial1 = SERIAL1.borrow_ref_mut(cs).as_mut().unwrap();
+
+        writeln!(serial1, "Hello World!").ok();
+
+        BUTTON
+            .borrow_ref_mut(cs)
+            .as_mut()
+            .unwrap()
+            .clear_interrupt();
+    });
 }

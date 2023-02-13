@@ -1,6 +1,7 @@
 {
     "rust-analyzer.checkOnSave.allTargets": false,
     "cSpell.words": [
+        "baudrate",
         "CNTL",
         "GPIO",
         "Leds",
