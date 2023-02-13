@@ -7,6 +7,15 @@ macro_rules! println {
     }};
 }
 
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        use crate::printer::Printer;
+        write!(Printer, $($arg)*).ok();
+    }};
+}
+
 const UART_TX_ONE_CHAR: usize = 0x4000_0068;
 pub struct Printer;
 
