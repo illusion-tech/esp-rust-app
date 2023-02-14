@@ -114,7 +114,6 @@ dependencies = [
  "paste",
  "riscv-atomic-emulation-trap",
  "strum",
- "ufmt-write",
  "void",
 ]
 
@@ -466,12 +465,6 @@ dependencies = [
  "nom8",
  "toml_datetime",
 ]
-
-[[package]]
-name = "ufmt-write"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e87a2ed6b42ec5e28cc3b94c09982969e9227600b2e3dcbc1db927a84c06bd69"
 
 [[package]]
 name = "unicode-ident"

@@ -1,23 +1,27 @@
 #![no_std]
 #![no_main]
 mod printer;
+
 use core::{cell::RefCell, fmt::Write};
 use critical_section::Mutex;
-use esp32c3_hal::uart::TxRxPins;
 use esp32c3_hal::{
     clock::ClockControl,
-    gpio::{Event, Gpio9, Input, PullDown, IO},
+    gpio::{Event, Gpio10, Gpio9, Input, Output, PullDown, PushPull, IO},
     interrupt::{self, CpuInterrupt, InterruptKind, Priority},
     peripherals::{Interrupt, Peripherals, UART1},
     prelude::*,
     riscv,
     timer::TimerGroup,
-    uart::config::{Config, DataBits, Parity, StopBits},
+    uart::{
+        config::{Config, DataBits, Parity, StopBits},
+        TxRxPins,
+    },
     Cpu, Delay, Rtc, Uart,
 };
 use esp_backtrace as _;
 
 static BUTTON: Mutex<RefCell<Option<Gpio9<Input<PullDown>>>>> = Mutex::new(RefCell::new(None));
+static GPIO10: Mutex<RefCell<Option<Gpio10<Output<PushPull>>>>> = Mutex::new(RefCell::new(None));
 static SERIAL1: Mutex<RefCell<Option<Uart<UART1>>>> = Mutex::new(RefCell::new(None));
 
 #[entry]
@@ -41,13 +45,15 @@ fn main() -> ! {
 
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
 
-    // Set GPIO9 as an input
+    // 设置 GPIO9（板载 boot 按钮）为输入
     let mut button = io.pins.gpio9.into_pull_down_input();
-    // let mut serial1 = Uart::new(peripherals.UART1);
+    // 设置 GPIO10 为输出控制 MAX3485 收发状态
+    let mut gpio10 = io.pins.gpio10.into_push_pull_output();
+    // 设置 UART1 控制器，并使用了 GPIO0 和 GPIO1 作为 TX 和 RX
     let mut serial1 = Uart::new_with_config(
         peripherals.UART1,
         Some(Config {
-            baudrate: 115200,
+            baudrate: 115_200,
             data_bits: DataBits::DataBits8,
             parity: Parity::ParityNone,
             stop_bits: StopBits::STOP1,
@@ -60,11 +66,13 @@ fn main() -> ! {
     );
 
     button.listen(Event::FallingEdge);
-
+    gpio10.set_low().unwrap();
+    // gpio10.set_
     serial1.set_rx_fifo_full_threshold(5);
     serial1.listen_rx_fifo_full();
 
     critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(button));
+    critical_section::with(|cs| GPIO10.borrow_ref_mut(cs).replace(gpio10));
     critical_section::with(|cs| SERIAL1.borrow_ref_mut(cs).replace(serial1));
 
     interrupt::enable(Interrupt::GPIO, Priority::Priority3).unwrap();
@@ -91,10 +99,19 @@ fn GPIO() {
 
         let mut serial1 = SERIAL1.borrow_ref_mut(cs);
         let serial1 = serial1.as_mut().unwrap();
+        let mut gpio10 = GPIO10.borrow_ref_mut(cs);
+        let gpio10 = gpio10.as_mut().unwrap();
 
-        // let serial1 = SERIAL1.borrow_ref_mut(cs).as_mut().unwrap();
+        // 设置高电平输出使 MAX3485 进入发送状态
+        gpio10.set_high().unwrap();
 
-        writeln!(serial1, "Hello World!").ok();
+        // 通过串口发送数据
+        // FIXME: 无法完整发送数据
+        serial1.write_bytes("Hello World!".as_bytes()).ok();
+        // writeln!(serial1, "World!").ok();
+
+        // 设置低电平使 MAX3485 恢复接受状态
+        gpio10.set_low().unwrap();
 
         BUTTON
             .borrow_ref_mut(cs)
