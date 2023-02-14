@@ -106,9 +106,8 @@ fn GPIO() {
         gpio10.set_high().unwrap();
 
         // 通过串口发送数据
-        // FIXME: 无法完整发送数据
-        serial1.write_bytes("Hello World!".as_bytes()).ok();
-        // writeln!(serial1, "World!").ok();
+        writeln!(serial1, "Hello World!").ok();
+        nb::block!(serial1.flush()).ok();
 
         // 设置低电平使 MAX3485 恢复接受状态
         gpio10.set_low().unwrap();
