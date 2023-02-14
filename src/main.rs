@@ -1,7 +1,3 @@
-//! GPIO interrupt
-//!
-//! This prints "Interrupt" when the boot button is pressed.
-
 #![no_std]
 #![no_main]
 mod printer;
@@ -48,7 +44,7 @@ fn main() -> ! {
     // Set GPIO9 as an input
     let mut button = io.pins.gpio9.into_pull_down_input();
     // let mut serial1 = Uart::new(peripherals.UART1);
-    let serial1 = Uart::new_with_config(
+    let mut serial1 = Uart::new_with_config(
         peripherals.UART1,
         Some(Config {
             baudrate: 115200,
@@ -65,8 +61,8 @@ fn main() -> ! {
 
     button.listen(Event::FallingEdge);
 
-    // serial1.set_rx_fifo_full_threshold(30);
-    // serial1.listen_rx_fifo_full();
+    serial1.set_rx_fifo_full_threshold(5);
+    serial1.listen_rx_fifo_full();
 
     critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(button));
     critical_section::with(|cs| SERIAL1.borrow_ref_mut(cs).replace(serial1));
@@ -105,5 +101,21 @@ fn GPIO() {
             .as_mut()
             .unwrap()
             .clear_interrupt();
+    });
+}
+
+#[interrupt]
+fn UART1() {
+    critical_section::with(|cs| {
+        let mut serial1 = SERIAL1.borrow_ref_mut(cs);
+        let serial1 = serial1.as_mut().unwrap();
+
+        // 从串口中读取数据直至缓冲区为空
+        while let Ok(byte) = serial1.read() {
+            print!("{}", byte as char);
+        }
+
+        serial1.reset_at_cmd_interrupt();
+        serial1.reset_rx_fifo_full_interrupt();
     });
 }
