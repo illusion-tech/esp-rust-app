@@ -72,9 +72,10 @@ fn main() -> ! {
     gpio10.set_low().unwrap();
 
     serial1.set_at_cmd(AtCmdConfig::new(None, None, None, b'#', None));
-    serial1.set_rx_fifo_full_threshold(32);
+    serial1.set_rx_fifo_full_threshold(64);
     serial1.listen_at_cmd();
     serial1.listen_rx_fifo_full();
+    serial1.listen_tx_brk_idle_done();
 
     critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(button));
     critical_section::with(|cs| GPIO10.borrow_ref_mut(cs).replace(gpio10));
@@ -89,7 +90,7 @@ fn main() -> ! {
     }
 
     let mut delay = Delay::new(&clocks);
-    println!("Hello world!");
+    // println!("Hello world!");
     loop {
         // print!(".");
         delay.delay_ms(500u32);
@@ -115,7 +116,13 @@ fn GPIO() {
         let mut mdb_req = rmodbus::client::ModbusRequest::new(1, rmodbus::ModbusProto::Rtu);
         let mut space = fixedvec::alloc_stack!([u8; 256]);
         let mut request = fixedvec::FixedVec::new(&mut space);
-        mdb_req.generate_set_holdings_string(0, "Hello World!", &mut request).unwrap();
+        mdb_req
+            .generate_set_holdings_string(
+                0,
+                "Hello World from ESP32C3 using Rust over RS483 using Modbus protocol!\r\n",
+                &mut request,
+            )
+            .unwrap();
 
         print!("{:?}", request);
         serial1.write_bytes(request.as_slice()).ok();
@@ -136,22 +143,37 @@ fn GPIO() {
 #[interrupt]
 fn UART1() {
     critical_section::with(|cs| {
+        println!("\r\nUART1 中断");
+
         let mut serial1 = SERIAL1.borrow_ref_mut(cs);
         let serial1 = serial1.as_mut().unwrap();
 
-        // 从串口中读取数据直至缓冲区为空
-        let mut cnt = 0;
-        while let nb::Result::Ok(_byte) = serial1.read() {
-            cnt += 1;
-            print!("{}", _byte as char);
+        if serial1.tx_brk_idle_done_interrupt_set() {
+            println!("TX-BRK-IDLE-DONE 中断");
+            serial1.reset_tx_brk_idle_done_interrupt();
+
+            return;
         }
 
-        println!("UART1 中断, 读取 {} 字节", cnt);
         println!(
             "中断类型 AT-CMD: {} RX-FIFO-FULL: {}",
             serial1.at_cmd_interrupt_set(),
             serial1.rx_fifo_full_interrupt_set()
         );
+
+        // let mut buf: rmodbus::ModbusFrameBuf = [0; 256];
+
+        // serial1
+
+        // 从串口中读取数据直至缓冲区为空
+        let mut cnt = 0;
+        // let x = nb::block!(serial1.read());
+        while let Ok(_byte) = nb::block!(serial1.read()) {
+            cnt += 1;
+            print!("{}", _byte as char);
+        }
+
+        println!("\r\n读取 {} 字节", cnt);
 
         serial1.reset_at_cmd_interrupt();
         serial1.reset_rx_fifo_full_interrupt();
