@@ -23,6 +23,8 @@ use esp_backtrace as _;
 
 // use rmodbus
 
+static DELAY: Mutex<RefCell<Option<Delay>>> = Mutex::new(RefCell::new(None));
+
 static BUTTON: Mutex<RefCell<Option<Gpio9<Input<PullDown>>>>> = Mutex::new(RefCell::new(None));
 static GPIO10: Mutex<RefCell<Option<Gpio10<Output<PushPull>>>>> = Mutex::new(RefCell::new(None));
 static SERIAL1: Mutex<RefCell<Option<Uart<UART1>>>> = Mutex::new(RefCell::new(None));
@@ -63,25 +65,35 @@ fn main() -> ! {
         }),
         Some(TxRxPins::new_tx_rx(
             io.pins.gpio0.into_push_pull_output(),
-            io.pins.gpio1.into_floating_input(),
+            io.pins.gpio1.into_pull_up_input(),
         )),
         &clocks,
     );
 
     button.listen(Event::FallingEdge);
+    // #[cfg(feature = "server")]
+    // {
     gpio10.set_low().unwrap();
+    // }
+    // #[cfg(feature = "client")]
+    // {
+    //     gpio10.set_high().unwrap();
+    // }
 
     serial1.set_at_cmd(AtCmdConfig::new(None, None, None, b'#', None));
     serial1.set_rx_fifo_full_threshold(64);
     serial1.listen_at_cmd();
     serial1.listen_rx_fifo_full();
-    serial1.listen_tx_brk_idle_done();
+    serial1.listen_tx_done();
 
     critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(button));
     critical_section::with(|cs| GPIO10.borrow_ref_mut(cs).replace(gpio10));
     critical_section::with(|cs| SERIAL1.borrow_ref_mut(cs).replace(serial1));
 
+    // #[cfg(feature = "server")]
+    // {
     interrupt::enable(Interrupt::GPIO, Priority::Priority3).unwrap();
+    // }
     interrupt::enable(Interrupt::UART1, Priority::Priority1).unwrap();
     interrupt::set_kind(Cpu::ProCpu, CpuInterrupt::Interrupt1, InterruptKind::Edge);
 
@@ -89,11 +101,16 @@ fn main() -> ! {
         riscv::interrupt::enable();
     }
 
-    let mut delay = Delay::new(&clocks);
-    // println!("Hello world!");
+    let delay = Delay::new(&clocks);
+
+    critical_section::with(|cs| DELAY.borrow_ref_mut(cs).replace(delay));
+
     loop {
-        // print!(".");
-        delay.delay_ms(500u32);
+        // critical_section::with(|cs| {
+        //     let mut delay = DELAY.borrow_ref_mut(cs);
+        //     let delay = delay.as_mut().unwrap();
+        // });
+        Delay::new(&clocks).delay_ms(500u32);
     }
 }
 
@@ -127,7 +144,11 @@ fn GPIO() {
         print!("{:?}", request);
         serial1.write_bytes(request.as_slice()).ok();
 
+        let mut delay = DELAY.borrow_ref_mut(cs);
+        let delay = delay.as_mut().unwrap();
+
         nb::block!(serial1.flush()).ok();
+        delay.delay_ms(request.len() as u32);
 
         BUTTON
             .borrow_ref_mut(cs)
@@ -148,9 +169,9 @@ fn UART1() {
         let mut serial1 = SERIAL1.borrow_ref_mut(cs);
         let serial1 = serial1.as_mut().unwrap();
 
-        if serial1.tx_brk_idle_done_interrupt_set() {
-            println!("TX-BRK-IDLE-DONE 中断");
-            serial1.reset_tx_brk_idle_done_interrupt();
+        if serial1.tx_done_interrupt_set() {
+            println!("TX-DONE 中断");
+            serial1.reset_tx_done_interrupt();
 
             return;
         }
