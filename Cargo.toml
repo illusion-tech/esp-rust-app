@@ -23,7 +23,14 @@ esp32c3-hal = { verion = "0.6.0", path = "esp-hal/esp32c3-hal", features = [
 # ] }
 riscv-rt = { version = "0.11", optional = true }
 critical-section = { version = "1.1.1" }
+rmodbus = { version = "0.6.4", default-features = false, features = [
+    "fullcontext",
+    "fixedvec",
+] }
+fixedvec = "0.2.4"
 
 [features]
-default = ["rt"]
+default = ["rt", "server"]
 rt = ["riscv-rt"]
+server = []
+client = []

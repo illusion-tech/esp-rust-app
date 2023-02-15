@@ -3,9 +3,12 @@
     "cSpell.words": [
         "baudrate",
         "CNTL",
+        "fixedvec",
         "GPIO",
         "Leds",
+        "Modbus",
         "riscv",
+        "rmodbus",
         "rwdt",
         "TIMG"
     ],

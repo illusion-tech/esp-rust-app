@@ -3,6 +3,7 @@
 mod printer;
 
 use core::{cell::RefCell, fmt::Write};
+// use ;
 use critical_section::Mutex;
 use esp32c3_hal::{
     clock::ClockControl,
@@ -13,12 +14,14 @@ use esp32c3_hal::{
     riscv,
     timer::TimerGroup,
     uart::{
-        config::{Config, DataBits, Parity, StopBits},
+        config::{AtCmdConfig, Config, DataBits, Parity, StopBits},
         TxRxPins,
     },
     Cpu, Delay, Rtc, Uart,
 };
 use esp_backtrace as _;
+
+// use rmodbus
 
 static BUTTON: Mutex<RefCell<Option<Gpio9<Input<PullDown>>>>> = Mutex::new(RefCell::new(None));
 static GPIO10: Mutex<RefCell<Option<Gpio10<Output<PushPull>>>>> = Mutex::new(RefCell::new(None));
@@ -55,7 +58,7 @@ fn main() -> ! {
         Some(Config {
             baudrate: 115_200,
             data_bits: DataBits::DataBits8,
-            parity: Parity::ParityNone,
+            parity: Parity::ParityEven,
             stop_bits: StopBits::STOP1,
         }),
         Some(TxRxPins::new_tx_rx(
@@ -67,8 +70,10 @@ fn main() -> ! {
 
     button.listen(Event::FallingEdge);
     gpio10.set_low().unwrap();
-    // gpio10.set_
-    serial1.set_rx_fifo_full_threshold(5);
+
+    serial1.set_at_cmd(AtCmdConfig::new(None, None, None, b'#', None));
+    serial1.set_rx_fifo_full_threshold(32);
+    serial1.listen_at_cmd();
     serial1.listen_rx_fifo_full();
 
     critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(button));
@@ -86,8 +91,7 @@ fn main() -> ! {
     let mut delay = Delay::new(&clocks);
     println!("Hello world!");
     loop {
-        print!(".");
-        // led.toggle().unwrap();
+        // print!(".");
         delay.delay_ms(500u32);
     }
 }
@@ -95,7 +99,7 @@ fn main() -> ! {
 #[interrupt]
 fn GPIO() {
     critical_section::with(|cs| {
-        println!("GPIO interrupt");
+        println!("GPIO 中断");
 
         let mut serial1 = SERIAL1.borrow_ref_mut(cs);
         let serial1 = serial1.as_mut().unwrap();
@@ -106,17 +110,26 @@ fn GPIO() {
         gpio10.set_high().unwrap();
 
         // 通过串口发送数据
-        writeln!(serial1, "Hello World!").ok();
-        nb::block!(serial1.flush()).ok();
+        // write!(serial1, "#Hello World!").ok();
 
-        // 设置低电平使 MAX3485 恢复接受状态
-        gpio10.set_low().unwrap();
+        let mut mdb_req = rmodbus::client::ModbusRequest::new(1, rmodbus::ModbusProto::Rtu);
+        let mut space = fixedvec::alloc_stack!([u8; 256]);
+        let mut request = fixedvec::FixedVec::new(&mut space);
+        mdb_req.generate_set_holdings_string(0, "Hello World!", &mut request).unwrap();
+
+        print!("{:?}", request);
+        serial1.write_bytes(request.as_slice()).ok();
+
+        nb::block!(serial1.flush()).ok();
 
         BUTTON
             .borrow_ref_mut(cs)
             .as_mut()
             .unwrap()
             .clear_interrupt();
+
+        // 设置低电平使 MAX3485 恢复接受状态
+        gpio10.set_low().unwrap();
     });
 }
 
@@ -127,9 +140,18 @@ fn UART1() {
         let serial1 = serial1.as_mut().unwrap();
 
         // 从串口中读取数据直至缓冲区为空
-        while let Ok(byte) = serial1.read() {
-            print!("{}", byte as char);
+        let mut cnt = 0;
+        while let nb::Result::Ok(_byte) = serial1.read() {
+            cnt += 1;
+            print!("{}", _byte as char);
         }
+
+        println!("UART1 中断, 读取 {} 字节", cnt);
+        println!(
+            "中断类型 AT-CMD: {} RX-FIFO-FULL: {}",
+            serial1.at_cmd_interrupt_set(),
+            serial1.rx_fifo_full_interrupt_set()
+        );
 
         serial1.reset_at_cmd_interrupt();
         serial1.reset_rx_fifo_full_interrupt();
