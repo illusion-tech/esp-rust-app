@@ -30,7 +30,7 @@ rmodbus = { version = "0.6.4", default-features = false, features = [
 fixedvec = "0.2.4"
 
 [features]
-default = ["rt", "server"]
+default = ["rt"]
 rt = ["riscv-rt"]
 server = []
 client = []

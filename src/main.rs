@@ -15,7 +15,7 @@ use esp32c3_hal::{
     timer::TimerGroup,
     uart::{
         config::{AtCmdConfig, Config, DataBits, Parity, StopBits},
-        TxRxPins,
+        AllPins, TxRxPins,
     },
     Cpu, Delay, Rtc, Uart,
 };
@@ -55,30 +55,26 @@ fn main() -> ! {
     // 设置 GPIO10 为输出控制 MAX3485 收发状态
     let mut gpio10 = io.pins.gpio10.into_push_pull_output();
     // 设置 UART1 控制器，并使用了 GPIO0 和 GPIO1 作为 TX 和 RX
-    let mut serial1 = Uart::new_with_config(
-        peripherals.UART1,
-        Some(Config {
-            baudrate: 115_200,
-            data_bits: DataBits::DataBits8,
-            parity: Parity::ParityEven,
-            stop_bits: StopBits::STOP1,
-        }),
-        Some(TxRxPins::new_tx_rx(
-            io.pins.gpio0.into_push_pull_output(),
-            io.pins.gpio1.into_pull_up_input(),
-        )),
-        &clocks,
+    // let pins = AllPins::new(
+    //     io.pins.gpio0.into_push_pull_output(),
+    //     io.pins.gpio1.into_pull_up_input(),
+    //     io.pins.gpio10.into_push_pull_output(),
+    //     io.pins.gpio18.into_push_pull_output(),
+    // );
+    let pins = TxRxPins::new_tx_rx(
+        io.pins.gpio0.into_push_pull_output(),
+        io.pins.gpio1.into_pull_up_input(),
     );
+    let config = Config {
+        baudrate: 115_200,
+        data_bits: DataBits::DataBits8,
+        parity: Parity::ParityEven,
+        stop_bits: StopBits::STOP1,
+    };
+    let mut serial1 = Uart::new_with_config(peripherals.UART1, Some(config), Some(pins), &clocks);
 
     button.listen(Event::FallingEdge);
-    // #[cfg(feature = "server")]
-    // {
     gpio10.set_low().unwrap();
-    // }
-    // #[cfg(feature = "client")]
-    // {
-    //     gpio10.set_high().unwrap();
-    // }
 
     serial1.set_at_cmd(AtCmdConfig::new(None, None, None, b'#', None));
     serial1.set_rx_fifo_full_threshold(64);
@@ -86,34 +82,38 @@ fn main() -> ! {
     serial1.listen_rx_fifo_full();
     serial1.listen_tx_done();
 
-    critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(button));
-    critical_section::with(|cs| GPIO10.borrow_ref_mut(cs).replace(gpio10));
-    critical_section::with(|cs| SERIAL1.borrow_ref_mut(cs).replace(serial1));
+    #[cfg(feature = "client")]
+    {
+        critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(button));
+        critical_section::with(|cs| GPIO10.borrow_ref_mut(cs).replace(gpio10));
+        critical_section::with(|cs| SERIAL1.borrow_ref_mut(cs).replace(serial1));
 
-    // #[cfg(feature = "server")]
-    // {
-    interrupt::enable(Interrupt::GPIO, Priority::Priority3).unwrap();
-    // }
-    interrupt::enable(Interrupt::UART1, Priority::Priority1).unwrap();
-    interrupt::set_kind(Cpu::ProCpu, CpuInterrupt::Interrupt1, InterruptKind::Edge);
+        interrupt::enable(Interrupt::GPIO, Priority::Priority3).unwrap();
+        interrupt::enable(Interrupt::UART1, Priority::Priority1).unwrap();
+        interrupt::set_kind(Cpu::ProCpu, CpuInterrupt::Interrupt1, InterruptKind::Edge);
 
-    unsafe {
-        riscv::interrupt::enable();
+        unsafe {
+            riscv::interrupt::enable();
+        }
     }
 
     let delay = Delay::new(&clocks);
 
     critical_section::with(|cs| DELAY.borrow_ref_mut(cs).replace(delay));
 
+    #[allow(clippy::empty_loop)]
     loop {
-        // critical_section::with(|cs| {
-        //     let mut delay = DELAY.borrow_ref_mut(cs);
-        //     let delay = delay.as_mut().unwrap();
-        // });
-        Delay::new(&clocks).delay_ms(500u32);
+        #[cfg(feature = "server")]
+        {
+            let byte = nb::block!(serial1.read()).unwrap();
+            print!("{byte:02x} ");
+        }
+
+        // Delay::new(&clocks).delay_ms(500u32);
     }
 }
 
+#[cfg(feature = "client")]
 #[interrupt]
 fn GPIO() {
     critical_section::with(|cs| {
@@ -133,13 +133,14 @@ fn GPIO() {
         let mut mdb_req = rmodbus::client::ModbusRequest::new(1, rmodbus::ModbusProto::Rtu);
         let mut space = fixedvec::alloc_stack!([u8; 256]);
         let mut request = fixedvec::FixedVec::new(&mut space);
-        mdb_req
-            .generate_set_holdings_string(
-                0,
-                "Hello World from ESP32C3 using Rust over RS483 using Modbus protocol!\r\n",
-                &mut request,
-            )
-            .unwrap();
+        mdb_req.generate_set_coil(0, true, &mut request).unwrap();
+        // mdb_req
+        //     .generate_set_holdings_string(
+        //         0,
+        //         "Hello World from ESP32C3 using Rust over RS483 using Modbus protocol!\r\n",
+        //         &mut request,
+        //     )
+        //     .unwrap();
 
         print!("{:?}", request);
         serial1.write_bytes(request.as_slice()).ok();
@@ -161,6 +162,7 @@ fn GPIO() {
     });
 }
 
+#[cfg(feature = "client")]
 #[interrupt]
 fn UART1() {
     critical_section::with(|cs| {
@@ -183,8 +185,6 @@ fn UART1() {
         );
 
         // let mut buf: rmodbus::ModbusFrameBuf = [0; 256];
-
-        // serial1
 
         // 从串口中读取数据直至缓冲区为空
         let mut cnt = 0;
