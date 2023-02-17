@@ -39,6 +39,7 @@ embassy-executor = { package = "embassy-executor", git = "https://github.com/emb
 static_cell = "1.0.0"
 
 [dev-dependencies]
+# esp-pacs = "*"
 
 [features]
 default = ["rt", "embassy-time-systick"]
