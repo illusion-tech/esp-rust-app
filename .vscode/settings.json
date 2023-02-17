@@ -7,9 +7,11 @@
         "GPIO",
         "Leds",
         "Modbus",
+        "Proto",
         "riscv",
         "rmodbus",
         "rwdt",
+        "SYSTIMER",
         "TIMG"
     ],
 }
