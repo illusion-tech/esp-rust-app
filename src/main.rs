@@ -22,6 +22,7 @@ use esp32c3_hal::{
 };
 use esp_backtrace as _;
 use log::debug;
+use server::Server;
 use static_cell::StaticCell;
 
 static EXECUTOR: StaticCell<Executor> = StaticCell::new();
@@ -36,9 +37,9 @@ async fn run() {
 }
 
 #[embassy_executor::task]
-async fn server(serial: Uart<'static, UART1>) {
-    let mut server = server::Server::new(1);
-    server.listen(serial).await;
+async fn server(serial: Uart<'static, UART1>, rts: Gpio10<Output<PushPull>>) {
+    let mut server = Server::new(1);
+    server.listen(serial, rts).await;
 }
 
 #[embassy_executor::task]
@@ -62,7 +63,7 @@ async fn receiver(
 
         Timer::after(Duration::from_micros(10)).await;
         serial.write_bytes(request.as_slice()).unwrap();
-        debug!("{} bytes written", request.len());
+        debug!("Request {} bytes written", request.len());
 
         rts.set_low().unwrap();
     }
@@ -121,7 +122,7 @@ fn main() -> ! {
     executor.run(|spawner| {
         spawner.spawn(run()).ok();
         #[cfg(feature = "server")]
-        spawner.spawn(server(serial1)).ok();
+        spawner.spawn(server(serial1, rts)).ok();
         #[cfg(feature = "client")]
         spawner.spawn(receiver(button, serial1, rts)).ok();
     });

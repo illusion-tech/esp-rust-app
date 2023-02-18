@@ -1,27 +1,32 @@
 use critical_section::with;
 use embassy_time::{Duration, Timer};
-use embedded_hal_nb::serial::Read;
+use embedded_hal_1::digital::OutputPin;
+use embedded_hal_nb::{serial::{Read, Write}, nb};
 use fixedvec::{alloc_stack, FixedVec};
 use log::{debug, error};
 use rmodbus::{server::ModbusFrame, ModbusFrameBuf, ModbusProto};
 
 use crate::CONTEXT;
 
-pub struct Server<T>
-where
-    T: Read,
-{
+pub struct Server<T, E> {
     id: u8,
     serial: Option<T>,
+    rts: Option<E>,
 }
 
-impl<T: Read> Server<T> {
+impl<T: Read + Write, E: OutputPin> Server<T, E> {
     pub fn new(id: u8) -> Self {
-        Server { id, serial: None }
+        Server {
+            id,
+            serial: None,
+            rts: None,
+        }
     }
 
-    pub async fn listen(&mut self, serial: T) {
+    pub async fn listen(&mut self, serial: T, rts: E) {
         self.serial = Some(serial);
+        self.rts = Some(rts);
+
         let mut mem = fixedvec::alloc_stack!([u8; 256]);
         let mut ptr = 0;
         let mut idle = true;
@@ -50,7 +55,7 @@ impl<T: Read> Server<T> {
             if delay > 10 {
                 if ptr != 0 {
                     debug!("Received: {:2x?}, {}, {}", mem, delay, ptr);
-                    self.proc_frame_bud(&mem);
+                    self.proc_frame_buf(&mem).await;
                     mem.fill(0);
                     ptr = 0;
                 }
@@ -61,7 +66,7 @@ impl<T: Read> Server<T> {
         }
     }
 
-    fn proc_frame_bud(&self, buf: &ModbusFrameBuf) {
+    async fn proc_frame_buf(&mut self, buf: &ModbusFrameBuf) {
         let mut mem = alloc_stack!([u8; 256]);
         let mut response = FixedVec::new(&mut mem);
         let mut frame = ModbusFrame::new(self.id, buf, ModbusProto::Rtu, &mut response);
@@ -93,9 +98,20 @@ impl<T: Read> Server<T> {
             frame.finalize_response().unwrap();
 
             debug!("{:x?}", response);
-            // if stream.write(response.as_slice()).is_err() {
-            //     return;
-            // }
+
+            let rts = self.rts.as_mut().unwrap();
+
+            rts.set_high().unwrap();
+            Timer::after(Duration::from_micros(10)).await;
+
+            response.as_slice().iter().for_each(|&byte| {
+                self.serial.as_mut().unwrap().write(byte).unwrap();
+            });
+
+            nb::block!(self.serial.as_mut().unwrap().flush()).unwrap();
+
+            rts.set_low().unwrap();
+            debug!("Response {} bytes written", response.len());
         } else {
             debug!("no response required");
         }
