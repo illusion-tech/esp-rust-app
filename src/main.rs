@@ -6,8 +6,10 @@
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
+mod server;
+use core::cell::RefCell;
 
-mod printer;
+use critical_section::{self, with, Mutex};
 use embassy_executor::Executor;
 use embassy_time::{Duration, Timer};
 use embedded_hal_async::digital::Wait;
@@ -19,90 +21,24 @@ use esp32c3_hal::{
     Uart,
 };
 use esp_backtrace as _;
+use log::debug;
 use static_cell::StaticCell;
+
+static EXECUTOR: StaticCell<Executor> = StaticCell::new();
+static CONTEXT: Mutex<RefCell<Option<rmodbus::server::context::ModbusContext>>> =
+    Mutex::new(RefCell::new(None));
 
 #[embassy_executor::task]
 async fn run() {
     loop {
-        print!(".");
         Timer::after(Duration::from_secs(1)).await;
     }
 }
 
 #[embassy_executor::task]
-async fn server(mut serial: Uart<'static, UART1>) {
-    fn test(buf: &rmodbus::ModbusFrameBuf) {
-        let mut mem = fixedvec::alloc_stack!([u8; 256]);
-        let mut response = fixedvec::FixedVec::new(&mut mem);
-        let mut frame =
-            rmodbus::server::ModbusFrame::new(1, buf, rmodbus::ModbusProto::Rtu, &mut response);
-
-        if frame.parse().is_err() {
-            println!("server error");
-            return;
-        }
-        if frame.processing_required {
-            println!("processing required");
-            
-            // let result = match frame.readonly {
-            //     true => frame.process_read(&CONTEXT.read().unwrap()),
-            //     false => frame.process_write(&mut CONTEXT.write().unwrap()),
-            // };
-            // if result.is_err() {
-            //     println!("frame processing error");
-            //     return;
-            // }
-        }
-
-        if frame.response_required {
-            println!("response required");
-            frame.finalize_response().unwrap();
-            println!("{:x?}", response);
-            // if stream.write(response.as_slice()).is_err() {
-            //     return;
-            // }
-        } else {
-            println!("no response required");
-        }
-    }
-
-    let mut mem = fixedvec::alloc_stack!([u8; 256]);
-    let mut ptr = 0;
-    let mut idle = true;
-    let mut delay = 0u8;
-    loop {
-        if idle {
-            print!("x");
-            Timer::after(Duration::from_millis(100)).await;
-        }
-
-        while let Ok(byte) = serial.read() {
-            idle = false;
-            println!("{byte:02x}");
-            mem[ptr] = byte;
-            ptr += 1;
-            delay = 0;
-            Timer::after(Duration::from_micros(100)).await;
-        }
-
-        if idle {
-            continue;
-        }
-
-        delay += 1;
-
-        if delay > 10 {
-            if ptr != 0 {
-                println!("Received: {:?}, {}, {}", mem, delay, ptr);
-                test(&mem);
-                mem.fill(0);
-                ptr = 0;
-            }
-
-            idle = true;
-            delay = 0;
-        }
-    }
+async fn server(serial: Uart<'static, UART1>) {
+    let mut server = server::Server::new(1);
+    server.listen(serial).await;
 }
 
 #[embassy_executor::task]
@@ -120,25 +56,22 @@ async fn receiver(
         let mut request = fixedvec::FixedVec::new(&mut mem);
         client.generate_set_coil(100, true, &mut request).unwrap();
 
-        println!("Request: {:?}", request);
+        debug!("Request: {:x?}", request);
 
         rts.set_high().unwrap();
 
         Timer::after(Duration::from_micros(10)).await;
         serial.write_bytes(request.as_slice()).unwrap();
-        println!("{} bytes written", request.len());
+        debug!("{} bytes written", request.len());
 
-        // let d = <usize as TryInto<u64>>::try_into(request.len()).unwrap() * 2;
-        // Timer::after(Duration::from_micros(d)).await;
         rts.set_low().unwrap();
     }
 }
 
-static EXECUTOR: StaticCell<Executor> = StaticCell::new();
-
 #[entry]
 fn main() -> ! {
-    println!("Init!");
+    esp_println::logger::init_logger(log::LevelFilter::Debug);
+
     let peripherals = esp32c3_hal::peripherals::Peripherals::take();
     let system = peripherals.SYSTEM.split();
     let clocks = esp32c3_hal::clock::ClockControl::boot_defaults(system.clock_control).freeze();
@@ -167,12 +100,7 @@ fn main() -> ! {
         parity: esp32c3_hal::uart::config::Parity::ParityEven,
         stop_bits: esp32c3_hal::uart::config::StopBits::STOP1,
     };
-    // let pins = esp32c3_hal::uart::AllPins::<_, _, Gpio9<Input<Floating>>, _> {
-    //     tx: Some(io.pins.gpio0.into_push_pull_output().into_ref()),
-    //     rx: Some(io.pins.gpio1.into_floating_input().into_ref()),
-    //     rts: Some(io.pins.gpio10.into_push_pull_output().into_ref()),
-    //     cts: None,
-    // };
+
     let pins = esp32c3_hal::uart::TxRxPins::new_tx_rx(
         io.pins.gpio0.into_push_pull_output(),
         io.pins.gpio1.into_floating_input(),
@@ -187,6 +115,7 @@ fn main() -> ! {
     )
     .unwrap();
 
+    with(|cs| CONTEXT.replace(cs, Some(rmodbus::server::context::ModbusContext::new())));
     let executor = EXECUTOR.init(Executor::new());
 
     executor.run(|spawner| {
