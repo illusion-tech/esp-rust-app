@@ -7,17 +7,19 @@ use core::cell::RefCell;
 use critical_section::{with, Mutex};
 use embassy_executor::{task, Executor};
 use embassy_time::{Duration, Timer};
-use esp_hal_common::{
+// use embedded_hal_async::digital::Wait;
+use esp32c3_hal::{
     clock::ClockControl,
     embassy, entry,
     interrupt::{self, Priority},
     peripherals::{Interrupt, Peripherals},
-    prelude::_embedded_hal_watchdog_WatchdogDisable,
+    prelude::*,
     systimer::SystemTimer,
     timer::TimerGroup,
     uart::{config::Config, TxRxPins},
     Rtc, Uart, IO,
 };
+use esp_backtrace as _;
 use esp_println::logger::init_logger;
 use log::LevelFilter;
 use rmodbus::server::context::ModbusContext;
@@ -32,6 +34,9 @@ async fn run() {
         Timer::after(Duration::from_secs(1)).await;
     }
 }
+
+// #[task]
+// async fn server {}
 
 #[entry]
 fn main() -> ! {
@@ -56,7 +61,7 @@ fn main() -> ! {
     wdt1.disable();
 
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
-    let mut rts = io.pins.gpio9.into_pull_down_input();
+    let mut rts = io.pins.gpio10.into_push_pull_output();
 
     let config = Config::default();
     let pins = TxRxPins::new_tx_rx(
