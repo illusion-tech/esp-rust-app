@@ -92,6 +92,7 @@ impl<T: Read + Write, E: OutputPin> Server<T, E> {
                 }
             });
         }
+        
 
         if frame.response_required {
             debug!("response required");
