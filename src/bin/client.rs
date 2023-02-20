@@ -5,6 +5,7 @@
 use embassy_executor::{task, Executor};
 use embassy_time::{Duration, Timer};
 use embedded_hal_async::digital::Wait;
+use embedded_hal_nb::nb::block;
 use esp32c3_hal::{
     clock::ClockControl,
     embassy, entry,
@@ -50,12 +51,12 @@ async fn run_client(
         debug!("Request: {:x?}", request);
 
         rts.set_high().unwrap();
-
-        Timer::after(Duration::from_micros(10)).await;
+        // Timer::after(Duration::from_micros(10)).await;
         serial.write_bytes(request.as_slice()).unwrap();
+        block!(serial.flush()).unwrap();
+        rts.set_low().unwrap();
         debug!("Request {} bytes written", request.len());
 
-        rts.set_low().unwrap();
     }
 }
 

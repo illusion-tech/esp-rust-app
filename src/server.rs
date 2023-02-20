@@ -34,7 +34,7 @@ impl<T: Read + Write, E: OutputPin> Server<T, E> {
 
         loop {
             if idle {
-                Timer::after(Duration::from_millis(100)).await;
+                Timer::after(Duration::from_millis(10)).await;
             }
 
             while let Ok(byte) = self.serial.as_mut().expect("").read() {
