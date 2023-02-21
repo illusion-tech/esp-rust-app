@@ -10,10 +10,11 @@ use core::cell::RefCell;
 use critical_section::{with, Mutex};
 use embassy_executor::{task, Executor};
 use embassy_time::{Duration, Timer};
+use embedded_hal_async::digital::Wait;
 use esp32c3_hal::{
     clock::ClockControl,
     embassy, entry,
-    gpio::{Gpio10, Output, PushPull},
+    gpio::{Gpio10, Gpio9, Input, Output, PullDown, PushPull},
     interrupt::{self, Priority},
     peripherals::{Interrupt, Peripherals, UART1},
     prelude::*,
@@ -24,7 +25,7 @@ use esp32c3_hal::{
 };
 use esp_backtrace as _;
 use esp_println::logger::init_logger;
-use log::LevelFilter;
+use log::{debug, LevelFilter};
 use rmodbus::server::context::ModbusContext;
 use server::Server;
 use static_cell::StaticCell;
@@ -42,6 +43,23 @@ async fn run() {
 #[task]
 async fn run_server(serial: Uart<'static, UART1>, rts: Gpio10<Output<PushPull>>) {
     Server::new(1).listen(serial, rts).await;
+}
+
+#[task]
+async fn check_context(mut button: Gpio9<Input<PullDown>>) {
+    loop {
+        button.wait_for_falling_edge().await.unwrap();
+
+        with(|cs| {
+            let context = CONTEXT.borrow(cs).borrow();
+            if let Some(context) = context.as_ref() {
+                let mut mem = fixedvec::alloc_stack!([bool; 20]);
+                let mut result = fixedvec::FixedVec::new(&mut mem);
+                context.get_coils_bulk(90, 20, &mut result).unwrap();
+                debug!("Context: {:?}", mem);
+            }
+        });
+    }
 }
 
 #[entry]
@@ -67,6 +85,7 @@ fn main() -> ! {
     wdt1.disable();
 
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
+    let button = io.pins.gpio9.into_pull_down_input();
     let mut rts = io.pins.gpio10.into_push_pull_output();
 
     let config = Config::default();
@@ -86,5 +105,6 @@ fn main() -> ! {
     executor.run(|spawner| {
         spawner.spawn(run()).unwrap();
         spawner.spawn(run_server(serial1, rts)).unwrap();
+        spawner.spawn(check_context(button)).unwrap();
     });
 }
