@@ -302,7 +302,9 @@ dependencies = [
 
 [[package]]
 name = "esp-hal-common"
-version = "0.6.0"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5df3ec9a2e4df155e5a99f50b76a3a6733e69941d453085d3258846e1bd0a64e"
 dependencies = [
  "cfg-if",
  "critical-section",
@@ -328,7 +330,9 @@ dependencies = [
 
 [[package]]
 name = "esp-hal-procmacros"
-version = "0.3.0"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "214510c5399a574ee6a521be48851d06aaa188b40c4b6b8f2a2c3b8d22afd12e"
 dependencies = [
  "darling 0.14.3",
  "proc-macro-crate",
@@ -370,7 +374,9 @@ dependencies = [
 
 [[package]]
 name = "esp32c3-hal"
-version = "0.6.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfd7f5e718f699c26e112ecb09233c2d8b401db2316625cd78a729ab75f775f9"
 dependencies = [
  "cfg-if",
  "embassy-time 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -394,7 +400,6 @@ dependencies = [
  "embedded-hal-async 0.2.0-alpha.0",
  "embedded-hal-nb",
  "esp-backtrace",
- "esp-hal-common",
  "esp-println",
  "esp32c3-hal",
  "fixedvec",

@@ -26,8 +26,7 @@ esp-backtrace = {version = "0.5.0", features = [
   "print-uart",
 ]}
 esp-println = {version = "0.3.1", features = ["log"]}
-esp-hal-common = {version = "0.6.0", path = "esp-hal/esp-hal-common"}
-esp32c3-hal = {verion = "0.6.0", path = "esp-hal/esp32c3-hal", features = [
+esp32c3-hal = {verion = "0.7.0", features = [
   "rt",
   "eh1",
   "vectored",
